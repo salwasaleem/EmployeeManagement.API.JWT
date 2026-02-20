@@ -8,7 +8,7 @@ namespace EmployeeManagement.API.Data
 
         public DbHelper(IConfiguration configuration)
         {
-            _connectionString = configuration.GetConnectionString("DefaultConnection");
+            _connectionString = configuration.GetConnectionString("DefaultConnection")!;
         }
 
         public SqlConnection GetConnection()

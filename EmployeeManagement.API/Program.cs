@@ -1,10 +1,11 @@
-using EmployeeManagement.API.Data;
+﻿using EmployeeManagement.API.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
-
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReact",
@@ -17,15 +18,18 @@ builder.Services.AddCors(options =>
         });
 });
 
-
 // Add services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddScoped<IDbHelper, DbHelper>();
+
+
+// ✅ ADD THIS LINE RIGHT HERE
+builder.Services.AddDbContext<EmployeeDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
-var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]);
+var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]!);
 
 builder.Services.AddAuthentication(options =>
 {
@@ -46,9 +50,9 @@ builder.Services.AddAuthentication(options =>
 });
 
 var app = builder.Build();
+
 app.UseRouting();
 app.UseCors("AllowReact");
-
 
 // Configure middleware
 if (app.Environment.IsDevelopment())
@@ -56,14 +60,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-app.UseAuthentication();
 
+app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
 app.Run();
-
-
-
-
-
-

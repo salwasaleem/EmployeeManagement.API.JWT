@@ -1,180 +1,136 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using EmployeeManagement.API.Data;
 using EmployeeManagement.API.Models;
-using Microsoft.Data.SqlClient;
-using System.Data;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 
 namespace EmployeeManagement.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // ✅ All endpoints require login
+    [Authorize]
     public class EmployeeController : ControllerBase
     {
-        private readonly IDbHelper _db;
+        private readonly EmployeeDbContext _context;
 
-        public EmployeeController(IDbHelper db)
+        public EmployeeController(EmployeeDbContext context)
         {
-            _db = db;
+            _context = context;
         }
 
-        // 🔐 ADMIN ONLY
+        // ✅ ADMIN — GET ALL
         [Authorize(Roles = "Admin")]
         [HttpGet("all")]
-        public IActionResult GetAllEmployees()
+        public async Task<IActionResult> GetAllEmployees()
         {
-            var employees = new List<EmployeeResponse>();
-
-            using SqlConnection conn = _db.GetConnection();
-            using SqlCommand cmd = new SqlCommand("sp_GetAllEmployees", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
-
-            conn.Open();
-            using SqlDataReader reader = cmd.ExecuteReader();
-
-            while (reader.Read())
-            {
-                employees.Add(new EmployeeResponse
+            var employees = await _context.Employees
+                .Select(e => new EmployeeResponse
                 {
-                    EmployeeId = (int)reader["EmployeeId"],
-                    Name = reader["Name"].ToString()!,
-                    Designation = reader["Designation"].ToString()!,
-                    Address = reader["Address"].ToString()!,
-                    Department = reader["Department"].ToString()!,
-                    JoiningDate = reader["JoiningDate"] == DBNull.Value
-                        ? null
-                        : (DateTime)reader["JoiningDate"],
-                    Skillset = reader["Skillset"].ToString()!,
-                    Username = reader["Username"].ToString()!,
-                    Role = reader["Role"].ToString()!,
-                    Status = (bool)reader["Status"],
-                    ProfileImageBase64 = reader["ProfileImage"] == DBNull.Value
-                        ? null
-                        : Convert.ToBase64String((byte[])reader["ProfileImage"])
-                });
-            }
+                    EmployeeId = e.EmployeeId,
+                    Name = e.Name,
+                    Designation = e.Designation,
+                    Address = e.Address,
+                    Department = e.Department,
+                    JoiningDate = e.JoiningDate,
+                    Skillset = e.Skillset,
+                    Username = e.Username,
+                    Role = e.Role,
+                    Status = e.Status,
+                    ProfileImageBase64 = e.ProfileImage != null
+                        ? Convert.ToBase64String(e.ProfileImage)
+                        : null
+                })
+                .ToListAsync();
 
             return Ok(employees);
         }
 
-        // 🔐 Logged-in user can view profile
-        [HttpGet("{employeeId}")]
-        public IActionResult GetEmployeeById(int employeeId)
+        // ✅ GET BY ID
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetEmployeeById(int id)
         {
-            using SqlConnection conn = _db.GetConnection();
-            using SqlCommand cmd = new SqlCommand("sp_GetEmployeeById", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@EmployeeId", employeeId);
+            var employee = await _context.Employees.FindAsync(id);
 
-            conn.Open();
-            using SqlDataReader reader = cmd.ExecuteReader();
-
-            if (!reader.Read())
+            if (employee == null)
                 return NotFound("Employee not found");
 
-            var employee = new EmployeeResponse
+            var response = new EmployeeResponse
             {
-                EmployeeId = (int)reader["EmployeeId"],
-                Name = reader["Name"].ToString()!,
-                Designation = reader["Designation"].ToString()!,
-                Address = reader["Address"].ToString()!,
-                Department = reader["Department"].ToString()!,
-                JoiningDate = reader["JoiningDate"] == DBNull.Value
-                    ? null
-                    : (DateTime)reader["JoiningDate"],
-                Skillset = reader["Skillset"].ToString()!,
-                Username = reader["Username"].ToString()!,
-                Role = reader["Role"].ToString()!,
-                Status = (bool)reader["Status"],
-                ProfileImageBase64 = reader["ProfileImage"] == DBNull.Value
-                    ? null
-                    : Convert.ToBase64String((byte[])reader["ProfileImage"])
+                EmployeeId = employee.EmployeeId,
+                Name = employee.Name,
+                Designation = employee.Designation,
+                Address = employee.Address,
+                Department = employee.Department,
+                JoiningDate = employee.JoiningDate,
+                Skillset = employee.Skillset,
+                Username = employee.Username,
+                Role = employee.Role,
+                Status = employee.Status,
+                ProfileImageBase64 = employee.ProfileImage != null
+                    ? Convert.ToBase64String(employee.ProfileImage)
+                    : null
             };
 
-            return Ok(employee);
+            return Ok(response);
         }
 
-        // 🔐 Admin OR employee (logged-in)
-        [HttpPut("{employeeId}")]
-        public IActionResult UpdateEmployee(int employeeId, [FromForm] UpdateEmployeeRequest request)
+        // ✅ UPDATE
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateEmployee(int id, [FromForm] UpdateEmployeeRequest request)
         {
-            using SqlConnection conn = _db.GetConnection();
-            using SqlCommand cmd = new SqlCommand("sp_UpdateEmployee", conn);
+            var employee = await _context.Employees.FindAsync(id);
+            if (employee == null)
+                return NotFound();
 
-            cmd.CommandType = CommandType.StoredProcedure;
+            employee.Name = request.Name;
+            employee.Designation = request.Designation;
+            employee.Address = request.Address;
+            employee.Department = request.Department;
+            employee.Skillset = request.Skillset;
 
-            cmd.Parameters.AddWithValue("@EmployeeId", employeeId);
-            cmd.Parameters.AddWithValue("@Name", request.Name);
-            cmd.Parameters.AddWithValue("@Designation", request.Designation);
-            cmd.Parameters.AddWithValue("@Address", request.Address);
-            cmd.Parameters.AddWithValue("@Department", request.Department);
-            cmd.Parameters.AddWithValue("@Skillset", request.Skillset);
-            cmd.Parameters.AddWithValue("@ModifiedBy", request.ModifiedBy);
+            if (!string.IsNullOrWhiteSpace(request.Username))
+                employee.Username = request.Username;
 
-            cmd.Parameters.AddWithValue("@Username",
-                string.IsNullOrWhiteSpace(request.Username)
-                    ? (object)DBNull.Value
-                    : request.Username);
-
-            cmd.Parameters.AddWithValue("@Password",
-                string.IsNullOrWhiteSpace(request.Password)
-                    ? (object)DBNull.Value
-                    : request.Password);
-
-            byte[]? imageBytes = null;
+            if (!string.IsNullOrWhiteSpace(request.Password))
+                employee.Password = request.Password;
 
             if (request.ProfileImage != null)
             {
-                using (var ms = new MemoryStream())
-                {
-                    request.ProfileImage.CopyTo(ms);
-                    imageBytes = ms.ToArray();
-                }
+                using var ms = new MemoryStream();
+                request.ProfileImage.CopyTo(ms);
+                employee.ProfileImage = ms.ToArray();
             }
 
-            var imageParam = new SqlParameter("@ProfileImage", SqlDbType.VarBinary);
-            imageParam.Value = imageBytes != null ? imageBytes : DBNull.Value;
-            cmd.Parameters.Add(imageParam);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
-
+            await _context.SaveChangesAsync();
             return Ok("Employee updated successfully");
         }
 
-        // 🔐 ADMIN ONLY
+        // ✅ SOFT DELETE
         [Authorize(Roles = "Admin")]
-        [HttpDelete("{employeeId}")]
-        public IActionResult SoftDeleteEmployee(int employeeId, [FromQuery] string modifiedBy)
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> SoftDeleteEmployee(int id)
         {
-            using SqlConnection conn = _db.GetConnection();
-            using SqlCommand cmd = new SqlCommand("sp_SoftDeleteEmployee", conn);
+            var employee = await _context.Employees.FindAsync(id);
+            if (employee == null)
+                return NotFound();
 
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@EmployeeId", employeeId);
-            cmd.Parameters.AddWithValue("@ModifiedBy", modifiedBy);
+            employee.Status = false;
+            await _context.SaveChangesAsync();
 
-            conn.Open();
-            cmd.ExecuteNonQuery();
-
-            return Ok("Employee deleted successfully");
+            return Ok("Employee disabled");
         }
 
-        // 🔐 ADMIN ONLY
+        // ✅ TOGGLE STATUS
         [Authorize(Roles = "Admin")]
         [HttpPut("toggle-status/{id}")]
-        public IActionResult ToggleStatus(int id, [FromQuery] string modifiedBy)
+        public async Task<IActionResult> ToggleStatus(int id)
         {
-            using SqlConnection conn = _db.GetConnection();
-            using SqlCommand cmd = new SqlCommand("sp_ToggleEmployeeStatus", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            var employee = await _context.Employees.FindAsync(id);
+            if (employee == null)
+                return NotFound();
 
-            cmd.Parameters.AddWithValue("@EmployeeId", id);
-            cmd.Parameters.AddWithValue("@ModifiedBy", modifiedBy);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
+            employee.Status = !employee.Status;
+            await _context.SaveChangesAsync();
 
             return Ok();
         }
